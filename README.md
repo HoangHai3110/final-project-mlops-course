@@ -342,3 +342,4 @@ For the first session (Jupyter notebook to Python script), keep it minimal:
 
 
 We will introduce additional tooling (linting, testing, packaging, environment management, containers, CI) in later sessions. For now, please ensure the steps above are completed and that you can run a Jupyter notebook and a simple Python script inside your 3.12 virtual environment.
+
