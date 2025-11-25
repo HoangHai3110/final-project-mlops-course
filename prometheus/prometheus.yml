@@ -1,0 +1,21 @@
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  # Tự monitor chính Prometheus
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['prometheus:9090']
+
+  # API service (nếu bạn đang chạy telco-api, metrics trên /metrics)
+  - job_name: 'telco-api'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['telco-api:8000']
+
+  # MLflow server (nếu có metrics)
+  - job_name: 'mlflow-server'
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['mlflow-server:5000']

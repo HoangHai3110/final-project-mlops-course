@@ -11,3 +11,7 @@ uvicorn==0.38.0
 httpx==0.28.1
 pytest==8.4.2
 pytest-cov==7.0.0
+prometheus-fastapi-instrumentator==7.1.0
+evidently==0.4.18
+apscheduler==3.10.4
+dvc[s3]

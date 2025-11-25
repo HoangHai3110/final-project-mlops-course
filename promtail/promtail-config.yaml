@@ -1,0 +1,48 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+
+    relabel_configs:
+      # container name: /telco-api -> telco-api
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+
+      # service name trong docker compose (telco-api, mlflow-server,...)
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_service']
+        target_label: 'service'
+
+      # project name của docker compose (tên folder)
+      - source_labels: ['__meta_docker_container_label_com_docker_compose_project']
+        target_label: 'compose_project'
+
+      # stdout / stderr
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'stream'
+
+      # job chung
+      - target_label: 'job'
+        replacement: 'docker'
+
+    pipeline_stages:
+      # Bóc format log Docker (giống cách thầy parse JSON, nhưng gọn hơn)
+      - docker: {}
+
+      # Bắt level trong message nếu có
+      - regex:
+          expression: '(?P<level>TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL|CRITICAL)'
+
+      - labels:
+          level:

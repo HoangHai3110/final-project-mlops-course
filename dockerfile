@@ -1,15 +1,18 @@
-FROM python:3.12-slim
+FROM python:3.13-slim
 
 WORKDIR /app
 
 COPY requirements.txt .
 
-# build normal model & copy to this dockerfile (not recommended)
-
-RUN pip install -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY scripts/ scripts/
 
 ENV PYTHONPATH=/app
 
-CMD ["python3", "scripts/session_3/api.py"]
+ENV MLFLOW_TRACKING_URI=http://mlflow-server:5000
+ENV MODEL_URI=models:/telco-churn-model/Production
+
+# EXPOSE 8000
+
+CMD ["uvicorn", "scripts.service.app:app", "--host", "0.0.0.0", "--port", "8000"]
