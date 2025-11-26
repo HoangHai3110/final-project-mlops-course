@@ -6,12 +6,15 @@ import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
+from urllib.parse import urlparse
+from fastapi import Request
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 # from evidently import Report
 # from evidently.presets import DataDriftPreset
 from fastapi import APIRouter
+from fastapi.staticfiles import StaticFiles
 
 DRIFT_NUMERIC_FEATURES = ["tenure", "MonthlyCharges"]
 DRIFT_THRESHOLD = 0.15  # 15% lệch so với reference
@@ -25,6 +28,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 REPORTS_DIR = PROJECT_ROOT / "reports"
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 logger.info(f"[MONITOR] REPORTS_DIR = {REPORTS_DIR}")
+
+REPORTS_BASE_URL = os.getenv("REPORTS_BASE_URL", "").rstrip("/")
 
 # File CSV tham chiếu
 DEFAULT_REFERENCE_PATH = PROJECT_ROOT / "data" / "telco_churn.csv"
@@ -58,6 +63,34 @@ FEATURE_COLUMNS = [
 # Lưu log production
 production_data: List[Dict[str, Any]] = []
 
+def _effective_reports_base_url(request: Request) -> str:
+    """
+    - Nếu có REPORTS_BASE_URL hợp lệ -> dùng nó
+    - Nhưng nếu REPORTS_BASE_URL là localhost mà request đang ở cloud -> bỏ qua
+    - Fallback: dùng chính host hiện tại + /reports
+    """
+    if REPORTS_BASE_URL:
+        try:
+            env_host = (urlparse(REPORTS_BASE_URL).hostname or "").lower()
+        except Exception:
+            env_host = ""
+
+        req_host = (request.url.hostname or "").lower()
+
+        # Nếu cloud mà env lại là localhost -> ignore env
+        if env_host in ("localhost", "127.0.0.1") and req_host not in ("localhost", "127.0.0.1"):
+            pass
+        else:
+            return REPORTS_BASE_URL
+
+    return str(request.base_url).rstrip("/") + "/reports"
+
+def report_url(request: Request, filename: str) -> str:
+    base = _effective_reports_base_url(request)
+    return f"{base.rstrip('/')}/{filename}"
+
+def latest_url(request: Request) -> str:
+    return report_url(request, "drift_report_latest.html")
 
 # ================= 2. HÀM DÙNG TRONG /predict ===================
 def log_prediction_for_monitoring(features: Dict[str, Any], prediction: Any) -> None:
@@ -345,14 +378,13 @@ def shutdown_scheduler() -> None:
 
 # ================= 4. 3 API MONITOR ===================
 @router.get("/monitor/generate_report")
-async def generate_report():
+async def generate_report(request: Request):
     logger.info(
         "[DRIFT][MANUAL] requested. production_data size = %d", len(production_data)
     )
     if not _can_run_report():
         return {
-            "message": "Not enough data to generate report. "
-            "Run the simulator first.",
+            "message": "Not enough data to generate report. Run the simulator first.",
             "current_data_points": len(production_data),
             "minimum_data_points_required": 10,
         }
@@ -367,12 +399,10 @@ async def generate_report():
         files.sort(key=os.path.getmtime, reverse=True)
         latest_name = os.path.basename(files[0]) if files else None
 
-        base_url = "http://localhost:8081"
-
         return {
             "message": "Report generated successfully (manual trigger)",
-            "latest_report_url": f"{base_url}/drift_report_latest.html",
-            "timestamped_report": f"{base_url}/{latest_name}" if latest_name else None,
+            "latest_report_url": latest_url(request),
+            "timestamped_report": report_url(request, latest_name) if latest_name else None,
             "data_points_analyzed": len(production_data),
         }
     except Exception as e:
@@ -381,15 +411,13 @@ async def generate_report():
 
 
 @router.get("/monitor/status")
-async def monitor_status():
+async def monitor_status(request: Request):
     report_files = []
 
     if REPORTS_DIR.exists():
         pattern = str(REPORTS_DIR / "drift_report_*.html")
         files = glob.glob(pattern)
         files.sort(key=os.path.getmtime, reverse=True)
-
-        base_url = "http://localhost:8081"
 
         for file in files[:10]:
             p = Path(file)
@@ -400,7 +428,7 @@ async def monitor_status():
             report_files.append(
                 {
                     "name": p.name,
-                    "url": f"{base_url}/{p.name}",
+                    "url": report_url(request, p.name),
                     "size_bytes": size,
                     "modified": mod_time,
                 }
@@ -408,7 +436,9 @@ async def monitor_status():
 
     job = scheduler.get_job("drift_detection")
     next_run = (
-        job.next_run_time.strftime("%Y-%m-%d %H:%M:%S") if job and job.next_run_time else None
+        job.next_run_time.strftime("%Y-%m-%d %H:%M:%S")
+        if job and job.next_run_time
+        else None
     )
 
     return {
@@ -420,18 +450,16 @@ async def monitor_status():
         "minimum_data_points_required": 10,
         "ready_for_detection": len(production_data) >= 10,
         "recent_reports": report_files,
-        "latest_report_url": (
-            "http://localhost:8081/drift_report_latest.html" if report_files else None
-        ),
+        "latest_report_url": (latest_url(request) if report_files else None),
     }
 
 
 @router.post("/monitor/trigger_now")
-async def trigger_drift_detection_now():
+async def trigger_drift_detection_now(request: Request):
     logger.info("[DRIFT][TRIGGER] immediate drift detection requested")
     generate_drift_report_background()
     return {
         "message": "Drift detection triggered successfully",
         "data_points_analyzed": len(production_data),
-        "latest_report_url": "http://localhost:8081/drift_report_latest.html",
+        "latest_report_url": latest_url(request),
     }

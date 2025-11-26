@@ -1,4 +1,8 @@
 [core]
-    remote = localstore
+    remote = my-minio-remote
 ['remote "localstore"']
     url = ../../dvc-storage
+['remote "my-minio-remote"']
+    url = s3://dvc-storage
+    endpointurl = http://localhost:9000
+    use_ssl = false
