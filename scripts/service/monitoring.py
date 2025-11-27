@@ -22,7 +22,10 @@ router = APIRouter()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-REPORTS_DIR = PROJECT_ROOT / "reports"
+# REPORTS_DIR = PROJECT_ROOT / "reports"
+# REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+# logger.info(f"[MONITOR] REPORTS_DIR = {REPORTS_DIR}")
+REPORTS_DIR = Path(os.getenv("REPORTS_DIR", PROJECT_ROOT / "reports")).resolve()
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 logger.info(f"[MONITOR] REPORTS_DIR = {REPORTS_DIR}")
 

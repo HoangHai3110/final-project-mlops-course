@@ -58,20 +58,6 @@ def get_model():
             detail="Model could not be loaded from MLflow; please try again later.",
         )
 
-
-# ❌ KHÔNG cần /health ở đây nữa vì bạn đã có /health trong app chính
-# Nếu vẫn muốn giữ health riêng cho model, có thể đổi path thành "/health/model"
-# hoặc xoá luôn block dưới:
-
-# @router.get("/health")
-# def health_check():
-#     """
-#     Endpoint health đơn giản cho Prometheus / browser.
-#     KHÔNG phụ thuộc vào model, luôn trả 200 nếu API sống.
-#     """
-#     return {"status": "ok"}
-
-
 @router.get("/model_info")
 def model_info():
     """

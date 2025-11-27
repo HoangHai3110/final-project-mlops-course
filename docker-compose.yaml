@@ -109,6 +109,7 @@ services:
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow:${MLFLOW_PORT}
       - MODEL_URI=models:/telco-churn-model/Production
+      - REPORTS_DIR=/app/reports
     ports:
       - "8000:8000"
     volumes:
