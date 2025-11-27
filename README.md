@@ -317,3 +317,5 @@ Nếu Evidently lỗi do mismatch với NumPy/Pydantic version trong môi trư�
 Cloud ECS demo thường chỉ cần chứng minh API public sống + gọi được endpoint.
 
 Monitoring state (production_data) trong demo đơn giản có thể là in-memory, nên khi container restart sẽ reset.
+
+
