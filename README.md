@@ -319,3 +319,4 @@ Cloud ECS demo thường chỉ cần chứng minh API public sống + gọi đư
 Monitoring state (production_data) trong demo đơn giản có thể là in-memory, nên khi container restart sẽ reset.
 
 
+
