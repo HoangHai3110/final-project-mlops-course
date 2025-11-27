@@ -1,346 +1,319 @@
-# MLOps Course - Student Machine Setup
+Telco Churn MLOps – End-to-End System (MLflow + FastAPI + Monitoring + Drift + Auto Retraining + DVC + CI/CD + AWS ECS)
 
-Use this guide to prepare a basic development environment for the first MLOps class.
+Dự án này xây dựng một hệ thống MLOps end-to-end cho bài toán Telco Churn Prediction, bao gồm:
 
-The first class will focus on working with Jupyter notebooks and converting them into Python scripts, version-controlling your work, and running code reliably in a virtual environment.
+Training + Experiment Tracking + Model Registry bằng MLflow
 
-## 0) Supported operating systems
+Model Serving bằng FastAPI (/predict, /predict_batch)
 
-- Windows 10/11: use WSL2 (Ubuntu recommended)
-- macOS (Apple Silicon or Intel)
-- Linux (Ubuntu/Debian-based)
+Monitoring: thu thập prediction logs, tạo drift reports
 
-Instructions below include platform-specific steps where needed.
+Auto retraining trigger dựa trên drift metrics (threshold + cooldown)
 
----
+Data Versioning bằng DVC (local remote + MinIO/S3 mimic)
 
-## 1) Windows only — Install WSL2 (Ubuntu)
+CI/CD bằng GitHub Actions (test + build container)
 
-1. Open PowerShell as Administrator and run:
-   ```powershell
-   wsl --install -d Ubuntu
-   ```
-   - If prompted, restart your computer.
-2. Launch "Ubuntu" from Start Menu, create a UNIX username and password.
-3. Update packages inside Ubuntu:
-   ```bash
-   sudo apt update && sudo apt -y upgrade
-   ```
+Deploy Cloud lên AWS ECS Fargate và gọi được public endpoint /health
 
-Why WSL2? It provides a Linux environment that matches most production tooling and simplifies Python setup.
+1) Kiến trúc tổng quan
+Thành phần chính
 
----
+FastAPI (telco-api): phục vụ dự đoán + collect data cho monitoring
 
-## 2) Install VS Code
+MLflow Server: tracking + registry model telco-churn-model
 
-1. Download and install VS Code from the official site: [code.visualstudio.com](https://code.visualstudio.com)
-2. Recommended extensions:
-   - "Python" (Microsoft)
-   - "Jupyter" (Microsoft)
-   - "Remote - WSL" (Windows only)
+MLflow Artifact Store (MinIO): lưu artifact model/metrics
 
-On Windows, after installing "Remote - WSL", open VS Code and connect to Ubuntu: press F1 → "WSL: Connect to WSL".
+Postgres (MLflow backend store)
 
----
+Prometheus + Grafana + Loki + Promtail: monitoring stack (tùy phần compose)
 
-## 3) Install Git
+Reports: drift report HTML được sinh vào folder reports/
 
-- Windows (inside WSL Ubuntu):
-  ```bash
-  sudo apt update && sudo apt -y install git
-  ```
-  (Optional) Install Git for Windows as well: [git-scm.com](https://git-scm.com)
+Data flow (high-level)
 
-- macOS:
-  - If prompted, install Command Line Tools, or install via Homebrew:
-    ```bash
-    brew install git
-    ```
+Client gọi POST /predict hoặc POST /predict_batch
 
-- Linux (Debian/Ubuntu):
-  ```bash
-  sudo apt update && sudo apt -y install git
-  ```
+API trả kết quả churn + log features/predictions vào bộ nhớ (production_data)
 
-Configure your identity (run in your primary dev shell: WSL Ubuntu/macOS/Linux):
-```bash
-git config --global user.name "Your Name"
-git config --global user.email "your.email@example.com"
-```
+POST /monitor/trigger_now hoặc scheduler chạy định kỳ:
 
-(Optional but recommended) Setup SSH for GitHub: follow GitHub docs: [docs.github.com → Generate a new SSH key and add it to GitHub](https://docs.github.com/en/authentication/connecting-to-github-with-ssh)
+tính drift score
 
----
+sinh report HTML
 
-## 4) Create a GitHub account
+nếu vượt ngưỡng → trigger retraining (python -m scripts.train)
 
-1. Sign up at: [github.com](https://github.com)
-2. Verify your email.
-3. (Optional) Enable 2FA for security.
+Retraining log model mới lên MLflow, tạo version mới trong Registry
 
----
+2) Cấu trúc thư mục
+.
+├── scripts/
+│   ├── train.py                    # training + log MLflow + register model
+│   └── service/
+│       ├── app.py                  # FastAPI main app
+│       ├── monitoring.py           # router /monitor + drift report + scheduler + retrain trigger
+│       ├── router/
+│       │   └── telco.py            # /predict, /predict_batch, /model_info
+│       └── schemas/
+│           ├── request.py          # Pydantic request models
+│           └── response.py         # Pydantic response models
+├── data/
+│   ├── telco_churn.csv             # dataset (DVC-tracked -> không commit raw)
+│   └── telco_churn.csv.dvc         # pointer file (commit)
+├── reports/
+│   ├── drift_report_latest.html
+│   └── drift_report_YYYYMMDD_HHMMSS.html
+├── docker-compose.yaml
+├── docker-compose.monitoring.yaml
+├── Dockerfile
+├── requirements.txt
+├── simulator.py                    # tool bắn traffic vào API
+└── .github/workflows/ci.yaml       # GitHub Actions CI/CD
 
-## 5) Install Python 3.12 with pyenv
+3) Chạy local (Docker Compose)
+3.1. Prerequisites
 
-We will use Python 3.12 and manage it with `pyenv`. This keeps your system Python untouched and makes switching versions easy.
+Docker / Docker Desktop
 
-### 5.1 Install pyenv
+Python venv (để chạy simulator/DVC local) – optional
 
-- Windows (WSL Ubuntu):
-  ```bash
-  # Dependencies
-  sudo apt update && sudo apt -y install build-essential curl git zlib1g-dev \
-    libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libffi-dev \
-    liblzma-dev tk-dev
+Port thường dùng:
 
-  # Install pyenv (via installer)
-  curl https://pyenv.run | bash
+API: 8000
 
-  # Shell init (Zsh)
-  echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.zshrc
-  echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.zshrc
-  echo 'eval "$(pyenv init -)"' >> ~/.zshrc
-  exec zsh -l
-  ```
-
-- macOS (with Homebrew):
-  ```bash
-  brew update
-  brew install pyenv
-  # Shell init (Zsh)
-  echo 'eval "$(pyenv init -)"' >> ~/.zshrc
-  exec zsh -l
-  ```
-
-- Linux (Ubuntu/Debian):
-  ```bash
-  sudo apt update && sudo apt -y install build-essential curl git zlib1g-dev \
-    libssl-dev libbz2-dev libreadline-dev libsqlite3-dev libffi-dev \
-    liblzma-dev tk-dev
-  curl https://pyenv.run | bash
-  echo 'export PYENV_ROOT="$HOME/.pyenv"' >> ~/.bashrc
-  echo 'command -v pyenv >/dev/null || export PATH="$PYENV_ROOT/bin:$PATH"' >> ~/.bashrc
-  echo 'eval "$(pyenv init -)"' >> ~/.bashrc
-  exec bash -l
-  ```
-
-Verify pyenv is installed:
-```bash
-pyenv --version
-```
-
-### 5.2 Install Python 3.12 and set local version
-
-```bash
-pyenv install 3.12.6   # or the latest 3.12.x shown by: pyenv install -l | grep " 3.12"
-pyenv global 3.12.6     # or use `pyenv local 3.12.6` inside your course folder
-python --version        # should show Python 3.12.x
-pip --version
-```
-
----
-
-## 6) Install Docker
-
-Docker is essential for containerizing applications and ensuring consistent environments across different systems. We'll install Docker Desktop for Windows/macOS or Docker Engine for Linux.
-
-### 6.1 Windows (WSL2)
-
-Docker Desktop for Windows integrates seamlessly with WSL2.
-
-1. **Download Docker Desktop**:
-   - Visit [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-   - Download "Docker Desktop for Windows"
-   - Run the installer (`Docker Desktop Installer.exe`)
-
-2. **Installation Steps**:
-   - When prompted, ensure "Use WSL 2 instead of Hyper-V" is checked
-   - Follow the installation wizard
-   - Restart your computer when prompted
-
-3. **Launch Docker Desktop**:
-   - Start Docker Desktop from the Start Menu
-   - Wait for Docker to start (you'll see a Docker icon in the system tray)
-
-4. **Verify Installation** (inside WSL Ubuntu):
-   ```bash
-   docker --version
-   docker-compose --version
-   docker run hello-world
-   ```
-   The `hello-world` command should pull and run a test container successfully.
-
-5. **Optional: Configure WSL2 Integration**:
-   - Open Docker Desktop → Settings → Resources → WSL Integration
-   - Enable integration with your Ubuntu distribution
-   - Click "Apply & Restart"
-
-### 6.2 macOS
-
-Docker Desktop for macOS supports both Apple Silicon (M1/M2/M3) and Intel processors.
-
-#### For Apple Silicon (M1/M2/M3) Macs:
-
-1. **Download Docker Desktop**:
-   - Visit [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-   - Download "Docker Desktop for Mac with Apple Silicon"
-   - Open the downloaded `.dmg` file
-
-2. **Installation**:
-   - Drag Docker.app to Applications folder
-   - Open Docker from Applications (you may need to authorize in System Preferences → Security & Privacy)
-   - Enter your macOS password when prompted
-
-3. **Verify Installation**:
-   ```bash
-   docker --version
-   docker-compose --version
-   docker run hello-world
-   ```
-
-#### For Intel Macs:
-
-1. **Download Docker Desktop**:
-   - Visit [docker.com/products/docker-desktop](https://www.docker.com/products/docker-desktop/)
-   - Download "Docker Desktop for Mac with Intel chip"
-   - Follow the same installation steps as above
-
-**Alternative (via Homebrew)**:
-```bash
-# Install via Homebrew (works for both Apple Silicon and Intel)
-brew install --cask docker
-
-# Start Docker Desktop
-open /Applications/Docker.app
-
-# Wait for Docker to start, then verify
-docker --version
-docker-compose --version
-docker run hello-world
-```
-
-### 6.3 Linux (Ubuntu/Debian-based)
-
-We'll install Docker Engine using the official Docker repository (recommended method).
-
-1. **Remove old versions** (if any):
-   ```bash
-   sudo apt-get remove docker docker-engine docker.io containerd runc
-   ```
-
-2. **Install prerequisites**:
-   ```bash
-   sudo apt-get update
-   sudo apt-get install -y \
-       ca-certificates \
-       curl \
-       gnupg \
-       lsb-release
-   ```
-
-3. **Add Docker's official GPG key**:
-   ```bash
-   sudo mkdir -p /etc/apt/keyrings
-   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-   ```
-
-4. **Set up Docker repository**:
-   ```bash
-   echo \
-     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-     $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-   ```
-
-5. **Install Docker Engine, CLI, and Containerd**:
-   ```bash
-   sudo apt-get update
-   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-   ```
-
-6. **Add your user to the docker group** (to run Docker without sudo):
-   ```bash
-   sudo usermod -aG docker $USER
-   ```
-   **Important**: Log out and log back in (or restart your terminal) for this change to take effect.
-
-7. **Verify Installation**:
-   ```bash
-   docker --version
-   docker-compose --version
-   docker run hello-world
-   ```
-
-### 6.4 Verify Docker Installation (All Platforms)
-
-After installation, verify that Docker is working correctly:
-
-```bash
-# Check Docker version
-docker --version
-# Should output something like: Docker version 24.0.7, build afdd53b
-
-# Check Docker Compose version
-docker-compose --version
-# Should output something like: Docker Compose version v2.23.0
-
-# Run a test container
-docker run hello-world
-# This should download and run a test image, printing "Hello from Docker!"
-
-# Check Docker daemon is running
-docker info
-# This should show detailed system information
-```
-
-### Troubleshooting
-
-**Windows WSL2**:
-- If `docker` command is not found in WSL, ensure Docker Desktop is running and WSL integration is enabled in Docker Desktop settings.
-- If you get permission errors, make sure your WSL Ubuntu user is in the `docker` group (usually handled automatically by Docker Desktop).
-
-**macOS**:
-- If Docker Desktop doesn't start, check System Preferences → Security & Privacy → General for authorization prompts.
-- On Apple Silicon, ensure you're using the Apple Silicon version of Docker Desktop.
-
-**Linux**:
-- If you get "permission denied" errors, ensure you've added your user to the docker group and logged out/in.
-- If Docker daemon isn't running, start it with: `sudo systemctl start docker`
-- Enable Docker to start on boot: `sudo systemctl enable docker`
-
-**General**:
-- If `hello-world` fails to pull, check your internet connection and Docker daemon status.
-- For more help, visit: [docs.docker.com/get-docker](https://docs.docker.com/get-docker/)
-
----
-
-## 7) Verify Git + GitHub access
-
-1. In your dev shell, generate an SSH key if you chose SSH:
-   ```bash
-   ssh-keygen -t ed25519 -C "your.email@example.com"
-   eval "$(ssh-agent -s)"
-   ssh-add ~/.ssh/id_ed25519
-   ```
-2. Add the public key (`~/.ssh/id_ed25519.pub`) to GitHub → Settings → SSH and GPG keys.
-3. Test:
-   ```bash
-   ssh -T git@github.com
-   ```
-   You should see a success message.
-
----
-
-## FAQ: Do we need other tools for the first class?
-
-For the first session (Jupyter notebook to Python script), keep it minimal:
-
-- Required:
-  - Python 3.12 + `venv`
-  - VS Code with Python + Jupyter extensions
-  - Jupyter/JupyterLab + ipykernel
-  - Git + GitHub account
-
-
-We will introduce additional tooling (linting, testing, packaging, environment management, containers, CI) in later sessions. For now, please ensure the steps above are completed and that you can run a Jupyter notebook and a simple Python script inside your 3.12 virtual environment.
+MLflow: 5050
 
+MinIO (MLflow): 9000/9001
 
+Grafana: 3000 (khi dùng monitoring compose)
+
+Report viewer (nếu có nginx): 8081
+
+3.2. Start core stack
+docker compose up -d --build
+
+
+Kiểm tra:
+
+docker ps
+curl http://localhost:8000/health
+
+
+Open:
+
+FastAPI docs: http://localhost:8000/docs
+
+MLflow: http://localhost:5050
+
+4) API endpoints
+4.1. Prediction
+
+POST /predict – dự đoán 1 record
+
+POST /predict_batch – dự đoán nhiều record
+
+GET /model_info – debug thông tin model load (tracking_uri, model_uri, last_error)
+
+GET /health – API liveness
+
+GET /metrics – Prometheus metrics endpoint
+
+4.2. Monitoring API (drift)
+
+GET /monitor/status
+
+GET /monitor/generate_report
+
+POST /monitor/trigger_now
+
+Lưu ý: monitoring API của project này chủ ý chỉ có 3 endpoint: status, generate_report, trigger_now.
+
+4.3. Truy cập drift report
+
+GET /reports/drift_report_latest.html
+
+GET /reports/drift_report_YYYYMMDD_HHMMSS.html
+
+(Thông qua FastAPI StaticFiles mount /reports)
+
+5) Simulator (bắn traffic để tạo production_data)
+
+Chạy traffic local:
+
+python simulator.py
+
+
+Chạy traffic vào API cloud (ECS):
+
+API_BASE_URL=http://<PUBLIC_IP>:8000 python simulator.py
+
+
+Ghi chú:
+
+simulator sẽ gọi POST {API_BASE_URL}/predict
+
+Bạn có thể chỉnh steps trong simulator giảm xuống để demo nhanh.
+
+6) Drift detection & Auto retraining
+6.1. Trigger drift thủ công
+curl -X POST http://localhost:8000/monitor/trigger_now
+
+6.2. Report trắng / evidently issue?
+
+Trong môi trường Python/Numpy mới, Evidently có thể không tương thích (ví dụ lỗi liên quan NumPy 2.0). Project đã có cơ chế fallback: nếu Evidently không usable thì sinh HTML summary đơn giản để vẫn có report demo.
+
+6.3. Auto retraining
+
+Flow:
+
+compute drift_score
+
+nếu drift_score >= DRIFT_THRESHOLD và can_retrain_now() (cooldown) → trigger python -m scripts.train
+
+training tạo version mới trong MLflow Registry telco-churn-model
+
+Nếu bạn thấy version tăng quá nhiều, hãy bật cooldown để tránh spam.
+
+7) DVC – Data Versioning
+7.1. DVC tracking dataset (đã làm)
+dvc add data/telco_churn.csv
+git add data/telco_churn.csv.dvc data/.gitignore .dvc/ .dvcignore
+git commit -m "Track telco dataset with DVC"
+
+
+Ý nghĩa:
+
+data/telco_churn.csv không commit Git
+
+Git chỉ commit file pointer data/telco_churn.csv.dvc
+
+7.2. DVC remote local (local filesystem)
+
+Ví dụ:
+
+mkdir -p ../dvc-storage
+dvc remote add -d localstore ../dvc-storage
+dvc push
+
+8) DVC with MinIO (S3 mimic) – theo hướng dẫn thầy
+8.1. Start MinIO
+docker compose -f docker-compose.minio.yml up -d
+
+
+MinIO console:
+
+http://localhost:9001
+
+Tạo bucket: dvc-storage
+
+8.2. Config remote S3 cho DVC
+# add remote
+dvc remote add my-minio-remote s3://dvc-storage
+dvc remote modify my-minio-remote endpointurl http://localhost:9000
+dvc remote modify my-minio-remote use_ssl false
+
+# credentials nên set local (không commit)
+dvc remote modify --local my-minio-remote access_key_id <YOUR_MINIO_ACCESS_KEY>
+dvc remote modify --local my-minio-remote secret_access_key <YOUR_MINIO_SECRET_KEY>
+
+# set default remote
+dvc config core.remote my-minio-remote
+
+# push data lên MinIO
+dvc push
+
+
+Lưu ý: credentials nằm ở .dvc/config.local (file này không commit Git).
+
+9) CI/CD – GitHub Actions
+
+Workflow nằm tại:
+
+.github/workflows/ci.yaml
+
+Mục tiêu:
+
+chạy pytest
+
+build Docker image (đảm bảo Dockerfile build OK)
+
+Cách trigger:
+
+Tạo PR hoặc push commit lên branch → Actions tự chạy
+
+Vào GitHub PR → tab Checks để xem trạng thái pass/fail
+
+10) Deploy lên AWS ECS (Fargate)
+10.1. Build & Push image lên ECR
+
+(Đã dùng AWS CLI + Docker login)
+
+High-level steps:
+
+Tạo ECR repo telco-api
+
+Docker login ECR
+
+Build image + tag + push :latest
+
+10.2. ECS Service
+
+Create cluster (Fargate)
+
+Task definition dùng image từ ECR
+
+Service chạy 1 task
+
+Mở inbound security group cho port 8000 (Anywhere IPv4) để test nhanh
+
+Lấy Public IP của task và gọi:
+
+http://<PUBLIC_IP>:8000/health
+
+http://<PUBLIC_IP>:8000/docs
+
+11) Environment variables (tổng hợp)
+
+Tuỳ environment (local/cloud), một số biến hữu ích:
+
+MLFLOW_TRACKING_URI
+
+MODEL_URI (default: models:/telco-churn-model/Production)
+
+TRAIN_DATA_PATH (để train từ path khác)
+
+API_BASE_URL (cho simulator bắn traffic vào local/cloud)
+
+REPORTS_BASE_URL (optional, nếu bạn có report viewer nginx; nếu không thì API tự serve /reports/...)
+
+12) Demo checklist (quay video nhanh)
+
+docker ps
+
+curl http://localhost:8000/health
+
+http://localhost:8000/docs
+
+chạy python simulator.py (hoặc 10–20 request)
+
+curl -X POST http://localhost:8000/monitor/trigger_now
+
+mở http://localhost:8000/reports/drift_report_latest.html
+
+mở MLflow → Model Registry → thấy version mới
+
+show DVC: dvc remote list + dvc push
+
+show GitHub Actions run pass
+
+ECS: curl http://<PUBLIC_IP>:8000/health
+
+13) Notes / Known limitations
+
+Nếu Evidently lỗi do mismatch với NumPy/Pydantic version trong môi trường container, project có fallback để vẫn sinh report HTML (đảm bảo demo được drift stage).
+
+Cloud ECS demo thường chỉ cần chứng minh API public sống + gọi được endpoint.
+
+Monitoring state (production_data) trong demo đơn giản có thể là in-memory, nên khi container restart sẽ reset.

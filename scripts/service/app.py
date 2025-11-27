@@ -15,8 +15,11 @@ app = FastAPI(
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
-# Serve reports folder (works for both local docker-compose and cloud)
-REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "/app/reports"))
+# # Serve reports folder (works for both local docker-compose and cloud)
+# REPORTS_DIR = Path(os.getenv("REPORTS_DIR", "/app/reports"))
+# REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+PROJECT_ROOT = Path(__file__).resolve().parents[2] 
+REPORTS_DIR = Path(os.getenv("REPORTS_DIR", PROJECT_ROOT / "reports")).resolve()
 REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/reports", StaticFiles(directory=str(REPORTS_DIR)), name="reports")
 
