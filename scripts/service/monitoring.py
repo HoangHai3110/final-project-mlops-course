@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 from fastapi import Request
+import time
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -18,6 +19,9 @@ from fastapi.staticfiles import StaticFiles
 
 DRIFT_NUMERIC_FEATURES = ["tenure", "MonthlyCharges"]
 DRIFT_THRESHOLD = 0.15  # 15% lệch so với reference
+
+RETRAIN_COOLDOWN_SECONDS = int(os.getenv("RETRAIN_COOLDOWN_SECONDS", "21600"))
+_last_retrain_ts: float | None = None
 
 logger = logging.getLogger("telco-monitor")
 
@@ -62,6 +66,12 @@ FEATURE_COLUMNS = [
 
 # Lưu log production
 production_data: List[Dict[str, Any]] = []
+
+def can_retrain_now() -> bool:
+    global _last_retrain_ts
+    if _last_retrain_ts is None:
+        return True
+    return (time.time() - _last_retrain_ts) >= RETRAIN_COOLDOWN_SECONDS
 
 def _effective_reports_base_url(request: Request) -> str:
     """
@@ -264,15 +274,15 @@ def generate_drift_report_background() -> None:
             drift_score = compute_drift_score(ref_means, current_means)
             logger.info(f"[DRIFT] Computed drift_score={drift_score:.3f}")
 
-            if drift_score >= DRIFT_THRESHOLD:
-                logger.info(
-                    f"[DRIFT] drift_score={drift_score:.3f} >= {DRIFT_THRESHOLD}, triggering auto retraining"
-                )
+            if drift_score >= DRIFT_THRESHOLD and can_retrain_now():
+                global _last_retrain_ts
+                _last_retrain_ts = time.time()
+                logger.info(f"[DRIFT] triggering auto retraining (cooldown ok)")
                 trigger_retraining_async(drift_score)
+            elif drift_score >= DRIFT_THRESHOLD:
+                logger.info(f"[DRIFT] drift >= threshold but still in cooldown, skip retrain")
             else:
-                logger.info(
-                    f"[DRIFT] drift_score={drift_score:.3f} < {DRIFT_THRESHOLD}, no retraining"
-                )
+                logger.info(f"[DRIFT] drift < threshold, no retraining")
 
             rows_html = ""
             for col in FEATURE_COLUMNS:

@@ -10,7 +10,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score
 import mlflow
 import mlflow.sklearn
-from mlflow.tracking import MlflowClient  # 👈 thêm
+from mlflow.tracking import MlflowClient  
 
 BASE_DIR = Path(__file__).resolve().parents[1]
 
